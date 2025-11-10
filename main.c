@@ -33,37 +33,77 @@
 #define MASK_ODR   0xf3
 
 // Ejemplo para ESP-IDF (I2C master). Ajusta QMC5883L_ADDRESS y macros según tu proyecto.
-
+   // Control1: OSR=64 (11), RNG=8G (01), ODR=200Hz (11), MODE=Continuous (01) DD
+       // Control2: leave default (INT_ENB=0, POL_PNT=0, SOFT_RST=0)
 #define QMC5883L_REG_SETRESET 0x0B
-
-void qmc5883l_init() {
-    // Control1: OSR=64 (11), RNG=8G (01), ODR=200Hz (11), MODE=Continuous (01)
-    const uint8_t config1 = 0xDD; // 1101 1101
-    // Control2: leave default (INT_ENB=0, POL_PNT=0, SOFT_RST=0)
-    const uint8_t config2 = 0x00;
-    // Set/reset period recommended value
+// OSR=512 (00), RNG=2G (00), ODR=10Hz (00), MODE=Continuous (01) 1D
+bool qmc5883l_init() {
+    esp_err_t ret;
+    
+    // Configuración recomendada según datasheet
+    const uint8_t config1 = 0xDD; 
+    const uint8_t config2 = 0x00; // Default
     const uint8_t setreset = 0x01;
 
+    // Verificar comunicación con el sensor
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
-    // direccion + write
     i2c_master_write_byte(cmd, (QMC5883L_ADDRESS << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_stop(cmd);
+    ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
+    
+    if (ret != ESP_OK) {
+        printf("Error: No se puede comunicar con QMC5883L\n");
+        return false;
+    }
 
-    // escribir SET/RESET primero (recomendado por datasheet)
-    i2c_master_write_byte(cmd, QMC5883L_REG_SETRESET, true);
-    i2c_master_write_byte(cmd, setreset, true);
-
-    // escribir Control Register 1
-    i2c_master_write_byte(cmd, QMC5883L_REG_CONFIG_1, true);
-    i2c_master_write_byte(cmd, config1, true);
-
-    // escribir Control Register 2 (opcional)
+    // Reset suave primero
+    cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (QMC5883L_ADDRESS << 1) | I2C_MASTER_WRITE, true);
     i2c_master_write_byte(cmd, QMC5883L_REG_CONFIG_2, true);
-    i2c_master_write_byte(cmd, config2, true);
-
+    i2c_master_write_byte(cmd, 0x80, true); // SOFT_RST = 1
     i2c_master_stop(cmd);
     i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
+    
+    vTaskDelay(50 / portTICK_PERIOD_MS); // Delay después del reset
+
+    // Configurar SET/RESET
+    cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (QMC5883L_ADDRESS << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, QMC5883L_REG_SETRESET, true);
+    i2c_master_write_byte(cmd, setreset, true);
+    i2c_master_stop(cmd);
+    ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
+    
+    if (ret != ESP_OK) {
+        printf("Error configurando SET/RESET\n");
+        return false;
+    }
+
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+
+    // Configurar Control Register 1
+    cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (QMC5883L_ADDRESS << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, QMC5883L_REG_CONFIG_1, true);
+    i2c_master_write_byte(cmd, config1, true);
+    i2c_master_stop(cmd);
+    ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
+    
+    if (ret != ESP_OK) {
+        printf("Error configurando CTRL1\n");
+        return false;
+    }
+
+    printf("QMC5883L inicializado correctamente\n");
+    return true;
 }
 
 
